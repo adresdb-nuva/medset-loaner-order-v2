@@ -151,10 +151,10 @@ export default function App() {
     setOrderHistory(updatedHistory);
     localStorage.setItem('medset_history', JSON.stringify(updatedHistory));
 
-    const subject = `Bestelling Medische Sets - ${metadata.hospital} - ${geformatteerdeDatum}`;
+    const subject = `Bestelling Loaner Sets - ${metadata.hospital} - ${geformatteerdeDatum}`;
     const body = `Beste,
 
-Hierbij een nieuwe bestelling voor medische sets.
+Hierbij een nieuwe bestelling voor loaner sets.
 
 DETAILS INGREEP
 ------------------------------------------------
