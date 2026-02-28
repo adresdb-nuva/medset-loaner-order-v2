@@ -6,10 +6,8 @@ import {
   ShoppingCart, 
   Trash2, 
   CheckCircle2, 
-  FileSpreadsheet,
   Package,
   MapPin,
-  AlertCircle,
   X,
   Hospital,
   Calendar,
@@ -24,6 +22,22 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { RegionData, MedicalSet, OrderItem, OrderMetadata, OrderHistoryItem } from './types';
 
+// --- DATA VOOR DROPDOWNS ---
+const ZIEKENHUIS_DATA: Record<string, { chirurgen: string[] }> = {
+  "Jessa Hasselt": {
+    chirurgen: ["Dr. Wissels", "Dr. Achahbar", "Dr. Put", "Dr. Roosen", "Dr. Bamps", "Dr. Vanvolsem", "Dr. Plazier", "Dr. Meeus"]
+  },
+  "St. Franciscus Heusden": {
+    chirurgen: ["Dr. Vanvolsem", "Dr. Achahbar"]
+  }
+};
+
+const TARGET_EMAILS = [
+  "belgiumorders@globusmedical.com",
+  "spelckmans@globusmedical.com",
+  "jwalravens@globusmedical.com"
+];
+
 export default function App() {
   const [data, setData] = useState<RegionData[]>([]);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
@@ -32,10 +46,13 @@ export default function App() {
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [view, setView] = useState<'order' | 'history'>('order');
+  const [selectedEmails, setSelectedEmails] = useState<string[]>(["belgiumorders@globusmedical.com"]);
+  
   const [orderHistory, setOrderHistory] = useState<OrderHistoryItem[]>(() => {
     const saved = localStorage.getItem('medset_history');
     return saved ? JSON.parse(saved) : [];
   });
+
   const [metadata, setMetadata] = useState<OrderMetadata>({
     hospital: '',
     date: '',
@@ -45,40 +62,28 @@ export default function App() {
     infoEmails: ''
   });
 
-  // 1. FUNCTIE OM DATA TE VERWERKEN
+  // 1. DATA VERWERKEN
   const processExcelData = useCallback((workbook: XLSX.WorkBook) => {
     const regions: RegionData[] = workbook.SheetNames.map((sheetName) => {
       const ws = workbook.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json<any>(ws);
-      
       const sets: MedicalSet[] = rows.map((row, index) => {
         const keys = Object.keys(row);
-        const name = row[keys[0]] || `Set ${index + 1}`;
-        const code = row[keys[1]] ? String(row[keys[1]]) : '';
-        const description = row[keys[2]] ? String(row[keys[2]]) : '';
-        
         return {
           id: `${sheetName}-${index}`,
-          name: String(name),
-          code: code,
-          description: description,
+          name: String(row[keys[0]] || `Set ${index + 1}`),
+          code: row[keys[1]] ? String(row[keys[1]]) : '',
+          description: row[keys[2]] ? String(row[keys[2]]) : '',
           region: sheetName
         };
       });
-
-      return {
-        name: sheetName,
-        sets
-      };
+      return { name: sheetName, sets };
     });
-
     setData(regions);
-    if (regions.length > 0) {
-      setSelectedRegion(regions[0].name);
-    }
+    if (regions.length > 0) setSelectedRegion(regions[0].name);
   }, []);
 
-  // 2. AUTOMATISCH LADEN VAN DATA.XLSX UIT DE PUBLIC MAP
+  // 2. AUTOMATISCH LADEN
   useEffect(() => {
     const loadDefaultFile = async () => {
       try {
@@ -87,17 +92,13 @@ export default function App() {
           const arrayBuffer = await response.arrayBuffer();
           const wb = XLSX.read(arrayBuffer, { type: 'buffer' });
           processExcelData(wb);
-        } else {
-          console.error("data.xlsx niet gevonden in public map");
         }
-      } catch (error) {
-        console.error("Fout bij laden van standaardbestand:", error);
-      }
+      } catch (error) { console.error("Laadfout:", error); }
     };
     loadDefaultFile();
   }, [processExcelData]);
 
-  // 3. HANDMATIGE UPLOAD LOGICA
+  // 3. HANDMATIGE UPLOAD & DRAG/DROP
   const handleFileUpload = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -120,20 +121,14 @@ export default function App() {
   const toggleSet = (set: MedicalSet) => {
     setSelectedSets(prev => {
       const exists = prev.find(s => s.setId === set.id);
-      if (exists) {
-        return prev.filter(s => s.setId !== set.id);
-      }
+      if (exists) return prev.filter(s => s.setId !== set.id);
       return [...prev, { setId: set.id, setName: set.name, setCode: set.code, region: set.region }];
     });
   };
 
-  const removeOrderItem = (setId: string) => {
-    setSelectedSets(prev => prev.filter(s => s.setId !== setId));
+  const toggleEmail = (email: string) => {
+    setSelectedEmails(prev => prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]);
   };
-
-  const currentSets = useMemo(() => {
-    return data.find(r => r.name === selectedRegion)?.sets || [];
-  }, [data, selectedRegion]);
 
   const placeOrder = () => {
     setShowConfirmModal(false);
@@ -143,7 +138,7 @@ export default function App() {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       items: selectedSets,
-      metadata: { ...metadata }
+      metadata: { ...metadata, infoEmails: selectedEmails.join(', ') }
     };
 
     const updatedHistory = [newOrder, ...orderHistory];
@@ -151,555 +146,143 @@ export default function App() {
     localStorage.setItem('medset_history', JSON.stringify(updatedHistory));
 
     const subject = `Bestelling Medische Sets - ${metadata.hospital} - ${metadata.date}`;
-    const body = `
-Beste,
+    const body = `Beste,\n\nHierbij een nieuwe bestelling voor medische sets.\n\nDETAILS INGREEP\n------------------\nHospitaal: ${metadata.hospital}\nDatum: ${metadata.date}\nChirurg: ${metadata.surgeon}\nAgent: ${metadata.agentName}\n\nBESTELDE SETS\n------------------\n${selectedSets.map(s => `- ${s.setName} (${s.setCode}) [${s.region}]`).join('\n')}\n\nOPMERKINGEN\n------------------\n${metadata.remarks || 'Geen'}`;
 
-Hierbij een nieuwe bestelling voor medische sets.
-
-DETAILS INGREEP
-------------------------------------------------
-Ziekenhuis: ${metadata.hospital}
-Datum: ${metadata.date}
-Chirurg: ${metadata.surgeon}
-Agent: ${metadata.agentName}
-
-BESTELDE SETS
-------------------------------------------------
-${selectedSets.map(s => `- ${s.setName} ${s.setCode ? `[Code: ${s.setCode}]` : ''} (${s.region})`).join('\n')}
-
-OPMERKINGEN
-------------------------------------------------
-${metadata.remarks || 'Geen opmerkingen'}
-
-Met vriendelijke groet,
-${metadata.agentName}
-    `.trim();
-
-    const mailtoLink = `mailto:${metadata.infoEmails}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoLink;
+    window.location.href = `mailto:${selectedEmails.join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
     setTimeout(() => {
       setOrderPlaced(false);
       setSelectedSets([]);
-      setMetadata({
-        hospital: '',
-        date: '',
-        surgeon: '',
-        agentName: '',
-        remarks: '',
-        infoEmails: ''
-      });
       setView('history');
     }, 2000);
   };
 
-  // 4. WEERGAVE ALS ER NOG GEEN DATA IS (LAADSCHERM)
+  // --- RENDERING ---
+
   if (data.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-xl w-full"
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-xl w-full">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white mb-4 shadow-lg shadow-indigo-200">
-              <Package className="animate-bounce" size={32} />
-            </div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">MedSet Loaner Order</h1>
-            <p className="text-slate-500 mt-2">Inventaris laden... Geduld aub.</p>
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 text-white mb-4 shadow-lg"><Package className="animate-bounce" size={32} /></div>
+            <h1 className="text-3xl font-bold text-slate-900">MedSet Loaner Order</h1>
+            <p className="text-slate-500 mt-2">Sleep een Excel bestand om te beginnen.</p>
           </div>
-
-          <div
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={onDrop}
-            className={cn(
-              "relative group cursor-pointer border-2 border-dashed rounded-3xl p-12 transition-all duration-300 flex flex-col items-center justify-center gap-4",
-              isDragging 
-                ? "border-indigo-500 bg-indigo-50/50 scale-[1.02]" 
-                : "border-slate-200 bg-white hover:border-indigo-400 hover:bg-slate-50/50"
-            )}
-            onClick={() => document.getElementById('fileInput')?.click()}
-          >
-            <input
-              id="fileInput"
-              type="file"
-              className="hidden"
-              accept=".xlsx, .xls"
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-            />
-            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 group-hover:text-indigo-500 group-hover:bg-indigo-100 transition-colors">
-              <Upload size={28} />
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-semibold text-slate-900">Sleep Excel bestand hierheen</p>
-              <p className="text-sm text-slate-500 mt-1">of klik om handmatig te bladeren</p>
-            </div>
+          <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} onClick={() => document.getElementById('fileInput')?.click()} className={cn("relative cursor-pointer border-2 border-dashed rounded-3xl p-12 transition-all text-center", isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-400")}>
+            <input id="fileInput" type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
+            <Upload className="mx-auto text-slate-400 mb-4" size={48} />
+            <p className="text-lg font-semibold text-slate-900">Klik of sleep bestand</p>
           </div>
         </motion.div>
       </div>
     );
   }
 
-  // 5. HOOFD APPLICATIE
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
-      <aside className="w-full lg:w-72 bg-white border-r border-slate-200 flex flex-col shrink-0">
-        <div className="p-6 border-bottom border-slate-100">
-          <div className="flex items-center gap-3 text-indigo-600 mb-6 cursor-pointer" onClick={() => setView('order')}>
-            <Package size={24} />
-            <span className="font-bold text-xl tracking-tight text-slate-900">MedSet</span>
-          </div>
-
-          <div className="mb-6">
-            <button
-              onClick={() => setView('history')}
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all mb-2",
-                view === 'history'
-                  ? "bg-indigo-50 text-indigo-700 shadow-sm"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              )}
-            >
-              <History size={18} className={view === 'history' ? "text-indigo-500" : "text-slate-400"} />
-              Geschiedenis
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
+      <aside className="w-full lg:w-72 bg-white border-r p-6 shrink-0">
+        <div className="flex items-center gap-3 text-indigo-600 mb-8 cursor-pointer" onClick={() => setView('order')}><Package size={24} /><span className="font-bold text-xl text-slate-900 tracking-tight">MedSet</span></div>
+        <nav className="space-y-1">
+          <button onClick={() => setView('history')} className={cn("w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium mb-4", view === 'history' ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50")}><History size={18}/> Geschiedenis</button>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 ml-4">Regio's</h2>
+          {data.map(r => (
+            <button key={r.name} onClick={() => { setSelectedRegion(r.name); setView('order'); }} className={cn("w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium", view === 'order' && selectedRegion === r.name ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50")}>
+              <div className="flex items-center gap-3"><MapPin size={18}/> {r.name}</div>
+              <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">{r.sets.length}</span>
             </button>
-          </div>
-
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Regio's</h2>
-          <nav className="space-y-1">
-            {data.map((region) => (
-              <button
-                key={region.name}
-                onClick={() => {
-                  setSelectedRegion(region.name);
-                  setView('order');
-                }}
-                className={cn(
-                  "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                  view === 'order' && selectedRegion === region.name
-                    ? "bg-indigo-50 text-indigo-700 shadow-sm"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <MapPin size={18} className={selectedRegion === region.name ? "text-indigo-500" : "text-slate-400"} />
-                  {region.name}
-                </div>
-                <span className="text-xs bg-white px-2 py-0.5 rounded-full border border-slate-200 text-slate-400">
-                  {region.sets.length}
-                </span>
-              </button>
-            ))}
-          </nav>
-        </div>
-        
-        <div className="mt-auto p-6 border-t border-slate-100">
-          <button 
-            onClick={() => setData([])}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-          >
-            <X size={16} />
-            Ander bestand uploaden
-          </button>
-        </div>
+          ))}
+        </nav>
       </aside>
 
-      <main className="flex-1 p-6 lg:p-10 overflow-auto bg-slate-50/50">
+      <main className="flex-1 p-6 lg:p-10 overflow-auto">
         <div className="max-w-4xl mx-auto">
-          {view === 'history' ? (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <header className="mb-8">
-                <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-                  <span>Overzicht</span>
-                  <ChevronRight size={14} />
-                  <span className="text-indigo-600 font-medium">Geschiedenis</span>
+          <h1 className="text-3xl font-bold text-slate-900 mb-8">{view === 'history' ? 'Bestelgeschiedenis' : selectedRegion}</h1>
+          {view === 'order' ? (
+            <div className="grid gap-3">
+              {data.find(r => r.name === selectedRegion)?.sets.map(set => (
+                <div key={set.id} onClick={() => toggleSet(set)} className={cn("p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between", selectedSets.some(s => s.setId === set.id) ? "border-indigo-500 bg-white shadow-md ring-2 ring-indigo-500/10" : "bg-white border-slate-200")}>
+                  <div><h3 className="font-bold text-slate-800">{set.name}</h3><p className="text-sm text-slate-500">{set.code}</p></div>
+                  {selectedSets.some(s => s.setId === set.id) && <CheckCircle2 className="text-indigo-600" size={20} />}
                 </div>
-                <h1 className="text-3xl font-bold text-slate-900">Bestelgeschiedenis</h1>
-              </header>
-
-              {orderHistory.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-3xl border border-slate-200">
-                  <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-4 text-slate-400">
-                    <History size={32} />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-900">Nog geen bestellingen</h3>
-                  <p className="text-slate-500 mt-1">Uw geplaatste bestellingen verschijnen hier.</p>
-                  <button 
-                    onClick={() => setView('order')}
-                    className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors"
-                  >
-                    Nieuwe bestelling
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {orderHistory.map((order) => (
-                    <div key={order.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                      <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
-                            <Clock size={20} />
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-900">
-                              {new Date(order.timestamp).toLocaleDateString('nl-NL', { 
-                                weekday: 'long', 
-                                year: 'numeric', 
-                                month: 'long', 
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </p>
-                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                              <span className="font-medium text-indigo-600">{order.items.length} sets</span>
-                              <span>•</span>
-                              <span>{order.metadata.hospital || 'Onbekend ziekenhuis'}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider">
-                            Besteld
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="p-6">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6 text-sm">
-                          <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Details</p>
-                            <div className="space-y-1 text-slate-600">
-                              <p><span className="text-slate-400 w-24 inline-block">Chirurg:</span> {order.metadata.surgeon || '-'}</p>
-                              <p><span className="text-slate-400 w-24 inline-block">Datum Ingreep:</span> {order.metadata.date || '-'}</p>
-                              <p><span className="text-slate-400 w-24 inline-block">Agent:</span> {order.metadata.agentName || '-'}</p>
-                            </div>
-                          </div>
-                          {order.metadata.remarks && (
-                            <div>
-                              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Opmerkingen</p>
-                              <p className="text-slate-600 italic bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                "{order.metadata.remarks}"
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bestelde Sets</p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {order.items.map((item, idx) => (
-                              <div key={`${order.id}-${idx}`} className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100 text-sm">
-                                <Package size={14} className="text-indigo-400" />
-                                <span className="font-medium text-slate-700 truncate">
-                                  {item.setName}
-                                  {item.setCode && <span className="ml-1 text-[10px] text-slate-400">({item.setCode})</span>}
-                                </span>
-                                <span className="text-xs text-slate-400 ml-auto bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                                  {item.region}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
+              ))}
+            </div>
           ) : (
-            <>
-              <header className="mb-8">
-                <div className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-                  <span>Inventaris</span>
-                  <ChevronRight size={14} />
-                  <span className="text-indigo-600 font-medium">{selectedRegion}</span>
+            <div className="space-y-4">
+              {orderHistory.map(order => (
+                <div key={order.id} className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex justify-between items-start mb-4">
+                    <div><p className="font-bold text-slate-900">{new Date(order.timestamp).toLocaleString()}</p><p className="text-sm text-indigo-600">{order.metadata.hospital}</p></div>
+                    <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase">Verzonden</span>
+                  </div>
+                  <div className="text-sm text-slate-600 space-y-1">{order.items.map((it, i) => <p key={i}>• {it.setName} ({it.region})</p>)}</div>
                 </div>
-                <h1 className="text-3xl font-bold text-slate-900">Beschikbare Sets</h1>
-              </header>
-
-              <div className="grid gap-3">
-                {currentSets.map((set) => {
-                  const isSelected = selectedSets.some(s => s.setId === set.id);
-                  return (
-                    <motion.div
-                      layout
-                      key={set.id}
-                      onClick={() => toggleSet(set)}
-                      className={cn(
-                        "group cursor-pointer flex items-center justify-between p-4 rounded-2xl border transition-all duration-200",
-                        isSelected 
-                          ? "bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500" 
-                          : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm"
-                      )}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={cn(
-                          "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
-                          isSelected ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200"
-                        )}>
-                          <Package size={24} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-slate-900">{set.name}</h3>
-                            {set.code && (
-                              <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
-                                {set.code}
-                              </span>
-                            )}
-                          </div>
-                          {set.description && (
-                            <p className="text-sm text-slate-500">{set.description}</p>
-                          )}
-                        </div>
-                      </div>
-                      <div className={cn(
-                        "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all",
-                        isSelected 
-                          ? "bg-indigo-600 border-indigo-600 text-white scale-110" 
-                          : "border-slate-200 group-hover:border-slate-300"
-                      )}>
-                        {isSelected && <CheckCircle2 size={14} strokeWidth={3} />}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </>
+              ))}
+            </div>
           )}
         </div>
       </main>
 
-      <aside className="w-full lg:w-96 bg-white border-l border-slate-200 flex flex-col shrink-0">
-        <div className="p-6 flex items-center justify-between border-b border-slate-100">
-          <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2">
-            <ShoppingCart size={20} className="text-indigo-600" />
-            Bestelling
-          </h2>
-          <span className="bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full text-xs font-bold">
-            {selectedSets.length} items
-          </span>
+      <aside className="w-full lg:w-96 bg-white border-l p-6 flex flex-col shrink-0">
+        <h2 className="font-bold text-lg mb-6 flex items-center gap-2"><ShoppingCart size={20} /> Bestelling</h2>
+        <div className="flex-1 space-y-2 overflow-y-auto">
+          {selectedSets.map(item => (
+            <div key={item.setId} className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-sm border">
+              <span className="truncate mr-2 font-medium">{item.setName}</span>
+              <button onClick={() => setSelectedSets(prev => prev.filter(s => s.setId !== item.setId))} className="text-slate-400 hover:text-red-500"><Trash2 size={16}/></button>
+            </div>
+          ))}
         </div>
-
-        <div className="flex-1 overflow-auto p-6">
-          <AnimatePresence mode="popLayout">
-            {selectedSets.length === 0 ? (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="h-full flex flex-col items-center justify-center text-center text-slate-400"
-              >
-                <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mb-4">
-                  <ShoppingCart size={24} />
-                </div>
-                <p className="text-sm">Geen sets geselecteerd</p>
-                <p className="text-xs mt-1">Vink sets aan in de lijst om ze toe te voegen</p>
-              </motion.div>
-            ) : (
-              <div className="space-y-3">
-                {selectedSets.map((item) => (
-                  <motion.div
-                    key={item.setId}
-                    layout
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">
-                        {item.setName}
-                        {item.setCode && <span className="ml-2 text-[10px] text-slate-400">({item.setCode})</span>}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{item.region}</p>
-                    </div>
-                    <button 
-                      onClick={() => removeOrderItem(item.setId)}
-                      className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div className="p-6 border-t border-slate-100 bg-slate-50/50">
-          <button
-            disabled={selectedSets.length === 0 || orderPlaced}
-            onClick={() => setShowConfirmModal(true)}
-            className={cn(
-              "w-full py-4 rounded-2xl font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2",
-              selectedSets.length === 0 
-                ? "bg-slate-300 cursor-not-allowed shadow-none" 
-                : orderPlaced 
-                  ? "bg-emerald-500 shadow-emerald-100" 
-                  : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100 hover:scale-[1.02] active:scale-[0.98]"
-            )}
-          >
-            {orderPlaced ? (
-              <>
-                <CheckCircle2 size={20} />
-                Bestelling Geplaatst!
-              </>
-            ) : (
-              <>
-                Bestellen
-                <ChevronRight size={20} />
-              </>
-            )}
-          </button>
-          <p className="text-[10px] text-center text-slate-400 mt-4 uppercase tracking-widest font-bold">
-            MedSet Loaner Management System
-          </p>
-        </div>
+        <button disabled={selectedSets.length === 0 || orderPlaced} onClick={() => setShowConfirmModal(true)} className="w-full py-4 mt-6 rounded-2xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 shadow-lg transition-transform active:scale-95">Bestelling Afronden</button>
       </aside>
 
+      {/* MODAL MET DROPDOWNS & CHECKBOXES */}
       <AnimatePresence>
         {showConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowConfirmModal(false)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold text-slate-900">Bevestig Bestelling</h3>
-                <button 
-                  onClick={() => setShowConfirmModal(false)}
-                  className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="p-6 max-h-[70vh] overflow-auto space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <Hospital size={12} /> Ziekenhuis
-                    </label>
-                    <input
-                      type="text"
-                      value={metadata.hospital}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, hospital: e.target.value }))}
-                      placeholder="Naam ziekenhuis"
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                    />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowConfirmModal(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="relative w-full max-w-lg bg-white rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <h3 className="text-2xl font-bold mb-6 text-slate-900">Bestelgegevens</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 mb-1"><Hospital size={14}/> Hospitaal</label>
+                  <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all" value={metadata.hospital} onChange={e => setMetadata(prev => ({ ...prev, hospital: e.target.value, surgeon: '' }))}>
+                    <option value="">-- Kies een ziekenhuis --</option>
+                    {Object.keys(ZIEKENHUIS_DATA).map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 mb-1"><User size={14}/> Chirurg</label>
+                  <select disabled={!metadata.hospital} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 transition-all" value={metadata.surgeon} onChange={e => setMetadata(prev => ({ ...prev, surgeon: e.target.value }))}>
+                    <option value="">-- Kies een chirurg --</option>
+                    {metadata.hospital && ZIEKENHUIS_DATA[metadata.hospital].chirurgen.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 mb-1"><Calendar size={14}/> Datum</label>
+                    <input type="date" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" onChange={e => setMetadata(prev => ({ ...prev, date: e.target.value }))} />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <Calendar size={12} /> Datum Ingreep
-                    </label>
-                    <input
-                      type="date"
-                      value={metadata.date}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, date: e.target.value }))}
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <User size={12} /> Chirurg
-                    </label>
-                    <input
-                      type="text"
-                      value={metadata.surgeon}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, surgeon: e.target.value }))}
-                      placeholder="Naam chirurg"
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <UserCheck size={12} /> Agent Naam
-                    </label>
-                    <input
-                      type="text"
-                      value={metadata.agentName}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, agentName: e.target.value }))}
-                      placeholder="Uw naam"
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div className="sm:col-span-2 space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <Mail size={12} /> Info aan:
-                    </label>
-                    <input
-                      type="text"
-                      value={metadata.infoEmails}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, infoEmails: e.target.value }))}
-                      placeholder="E-mailadressen (gescheiden door komma's)"
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                    />
-                  </div>
-                  <div className="sm:col-span-2 space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <MessageSquare size={12} /> Opmerkingen
-                    </label>
-                    <textarea
-                      value={metadata.remarks}
-                      onChange={(e) => setMetadata(prev => ({ ...prev, remarks: e.target.value }))}
-                      placeholder="Eventuele extra informatie..."
-                      rows={2}
-                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none"
-                    />
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 mb-1"><UserCheck size={14}/> Uw Naam</label>
+                    <input type="text" placeholder="Naam agent" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" onChange={e => setMetadata(prev => ({ ...prev, agentName: e.target.value }))} />
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Geselecteerde Sets</p>
+                <div className="pt-4 border-t">
+                  <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 mb-3"><Mail size={14} /> Kopie versturen naar:</label>
                   <div className="space-y-2">
-                    {selectedSets.map((item) => (
-                      <div key={item.setId} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
-                          <Package size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">
-                            {item.setName}
-                            {item.setCode && <span className="ml-2 text-[10px] text-slate-400">({item.setCode})</span>}
-                          </p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{item.region}</p>
-                        </div>
-                      </div>
+                    {TARGET_EMAILS.map(email => (
+                      <label key={email} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+                        <input type="checkbox" checked={selectedEmails.includes(email)} onChange={() => toggleEmail(email)} className="w-5 h-5 accent-indigo-600 rounded" />
+                        <span className="text-sm font-medium text-slate-700">{email}</span>
+                      </label>
                     ))}
                   </div>
                 </div>
               </div>
-
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
-                >
-                  Annuleren
-                </button>
-                <button
-                  onClick={placeOrder}
-                  className="flex-1 px-6 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all"
-                >
-                  Bevestig Bestelling
-                </button>
+              <div className="flex gap-4 mt-8">
+                <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3 font-bold text-slate-400 hover:text-slate-600 transition-colors">Annuleren</button>
+                <button disabled={!metadata.hospital || !metadata.surgeon || !metadata.date || selectedEmails.length === 0} onClick={placeOrder} className="flex-1 py-3 font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-md">Verstuur Bestelling</button>
               </div>
             </motion.div>
           </div>
