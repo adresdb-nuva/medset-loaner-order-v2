@@ -56,9 +56,9 @@ export default function App() {
 
   const [metadata, setMetadata] = useState<OrderMetadata>({
     hospital: '',
-    date: '',
+    surgerydate: '',
     surgeon: '',
-    agentName: '',
+    agentName: 'Dirk',
     remarks: '',
     infoEmails: ''
   });
