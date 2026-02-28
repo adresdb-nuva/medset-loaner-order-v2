@@ -12,11 +12,10 @@ import {
   Hospital,
   Calendar,
   User,
-  MessageSquare,
-  UserCheck,
   Mail,
   Clock,
-  History
+  History,
+  UserCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -25,7 +24,7 @@ import { RegionData, MedicalSet, OrderItem, OrderMetadata, OrderHistoryItem } fr
 // --- CONFIGURATIE DATA ---
 const ZIEKENHUIS_DATA: Record<string, { chirurgen: string[] }> = {
   "Jessa Hasselt": {
-    chirurgen: ["Dr. Wissels", "Dr. Achahbar", "Dr. Put", "Dr. Roosen", "Dr. Bamps", "Dr. Vanvolsem", "Dr. Plazier", "Dr. Meeus", "andere"]
+    chirurgen: ["Dr. Wissels", "Dr. Achahbar", "Dr. Put", "Dr. Roosen", "Dr. Bamps", "Dr. Vanvolsem", "Dr. Plazier", "Dr. Meeus"]
   },
   "St. Franciscus Heusden": {
     chirurgen: ["Dr. Vanvolsem", "Dr. Achahbar"]
@@ -35,8 +34,7 @@ const ZIEKENHUIS_DATA: Record<string, { chirurgen: string[] }> = {
 const TARGET_EMAILS = [
   "belgiumorders@globusmedical.com",
   "spelckmans@globusmedical.com",
-  "jwalravens@globusmedical.com", 
-  "dirk@i-conic.be"
+  "jwalravens@globusmedical.com"
 ];
 
 export default function App() {
@@ -63,7 +61,6 @@ export default function App() {
     infoEmails: ''
   });
 
-  // 1. EXCEL DATA VERWERKEN
   const processExcelData = useCallback((workbook: XLSX.WorkBook) => {
     const regions: RegionData[] = workbook.SheetNames.map((sheetName) => {
       const ws = workbook.Sheets[sheetName];
@@ -84,7 +81,6 @@ export default function App() {
     if (regions.length > 0) setSelectedRegion(regions[0].name);
   }, []);
 
-  // 2. AUTOMATISCH LADEN VAN DATA.XLSX
   useEffect(() => {
     const loadDefaultFile = async () => {
       try {
@@ -99,7 +95,6 @@ export default function App() {
     loadDefaultFile();
   }, [processExcelData]);
 
-  // 3. UPLOAD & DRAG/DROP LOGICA
   const handleFileUpload = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -131,11 +126,20 @@ export default function App() {
     setSelectedEmails(prev => prev.includes(email) ? prev.filter(e => e !== email) : [...prev, email]);
   };
 
-  // 4. BESTELLING FINALISEREN (MAILTO)
   const placeOrder = () => {
     setShowConfirmModal(false);
     setOrderPlaced(true);
     
+    // DATUM FORMATTEREN NAAR DD-MM-YYYY
+    let geformatteerdeDatum = metadata.date;
+    if (metadata.date) {
+        const d = new Date(metadata.date);
+        const dag = String(d.getDate()).padStart(2, '0');
+        const maand = String(d.getMonth() + 1).padStart(2, '0');
+        const jaar = d.getFullYear();
+        geformatteerdeDatum = `${dag}-${maand}-${jaar}`;
+    }
+
     const newOrder: OrderHistoryItem = {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -147,15 +151,15 @@ export default function App() {
     setOrderHistory(updatedHistory);
     localStorage.setItem('medset_history', JSON.stringify(updatedHistory));
 
-    const subject = `Bestelling Loaner Sets - ${metadata.hospital} - ${metadata.date}`;
+    const subject = `Bestelling Medische Sets - ${metadata.hospital} - ${geformatteerdeDatum}`;
     const body = `Beste,
 
-Hierbij een nieuwe bestelling voor loaner sets.
+Hierbij een nieuwe bestelling voor medische sets.
 
 DETAILS INGREEP
 ------------------------------------------------
 Ziekenhuis: ${metadata.hospital}
-OKa-dag: ${metadata.date}
+OKa-dag: ${geformatteerdeDatum}
 Chirurg: ${metadata.surgeon}
 Agent: ${metadata.agentName}
 
@@ -179,8 +183,6 @@ ${metadata.agentName}`;
     }, 2000);
   };
 
-  // --- INTERFACE RENDERING ---
-
   if (data.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 font-sans">
@@ -192,13 +194,7 @@ ${metadata.agentName}`;
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">MedSet Loaner Order</h1>
             <p className="text-slate-500 mt-2">Inventaris laden...</p>
           </div>
-          <div 
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} 
-            onDragLeave={() => setIsDragging(false)} 
-            onDrop={onDrop} 
-            onClick={() => document.getElementById('fileInput')?.click()}
-            className={cn("relative group cursor-pointer border-2 border-dashed rounded-3xl p-12 transition-all flex flex-col items-center justify-center gap-4", isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-400")}
-          >
+          <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={onDrop} onClick={() => document.getElementById('fileInput')?.click()} className={cn("relative group cursor-pointer border-2 border-dashed rounded-3xl p-12 transition-all flex flex-col items-center justify-center gap-4", isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-400")}>
             <input id="fileInput" type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
             <Upload className="text-slate-400" size={40} />
             <div className="text-center">
@@ -213,7 +209,6 @@ ${metadata.agentName}`;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans">
-      {/* Linker Sidebar */}
       <aside className="w-full lg:w-72 bg-white border-r border-slate-200 p-6 flex flex-col shrink-0">
         <div className="flex items-center gap-3 text-indigo-600 mb-8 cursor-pointer" onClick={() => setView('order')}>
           <Package size={24} />
@@ -233,7 +228,6 @@ ${metadata.agentName}`;
         </nav>
       </aside>
 
-      {/* Middenstuk (Sets / Geschiedenis) */}
       <main className="flex-1 p-6 lg:p-10 overflow-auto bg-slate-50/50">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold text-slate-900 mb-8">{view === 'history' ? 'Bestelgeschiedenis' : selectedRegion}</h1>
@@ -267,11 +261,9 @@ ${metadata.agentName}`;
         </div>
       </main>
 
-      {/* Rechter Sidebar (Winkelmand) */}
       <aside className="w-full lg:w-96 bg-white border-l border-slate-200 p-6 flex flex-col shrink-0">
         <h2 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-900"><ShoppingCart size={20} className="text-indigo-600" /> Bestelling</h2>
         <div className="flex-1 space-y-2 overflow-y-auto">
-          {selectedSets.length === 0 && <p className="text-slate-400 text-sm italic text-center mt-10">Selecteer sets uit de lijst</p>}
           {selectedSets.map(item => (
             <div key={item.setId} className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-sm border border-slate-100">
               <span className="font-medium truncate mr-2 text-slate-700">{item.setName}</span>
@@ -282,7 +274,6 @@ ${metadata.agentName}`;
         <button disabled={selectedSets.length === 0 || orderPlaced} onClick={() => setShowConfirmModal(true)} className="w-full py-4 mt-6 rounded-2xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 shadow-lg shadow-indigo-100 transition-all active:scale-95">Bestelling Afronden</button>
       </aside>
 
-      {/* MODAL VOOR GEGEVENS */}
       <AnimatePresence>
         {showConfirmModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -330,13 +321,7 @@ ${metadata.agentName}`;
 
               <div className="flex gap-4 mt-10">
                 <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3 font-bold text-slate-400 hover:text-slate-600">Annuleren</button>
-                <button 
-                  disabled={!metadata.hospital || !metadata.surgeon || !metadata.date || selectedEmails.length === 0} 
-                  onClick={placeOrder} 
-                  className="flex-1 py-3 font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-md transition-all active:scale-95"
-                >
-                  Verstuur Mail
-                </button>
+                <button disabled={!metadata.hospital || !metadata.surgeon || !metadata.date || selectedEmails.length === 0} onClick={placeOrder} className="flex-1 py-3 font-bold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:bg-slate-200 shadow-md transition-all active:scale-95">Verstuur Mail</button>
               </div>
             </motion.div>
           </div>
