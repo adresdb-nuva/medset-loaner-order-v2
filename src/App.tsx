@@ -25,7 +25,7 @@ import { RegionData, MedicalSet, OrderItem, OrderMetadata, OrderHistoryItem } fr
 // --- CONFIGURATIE DATA ---
 const ZIEKENHUIS_DATA: Record<string, { chirurgen: string[] }> = {
   "Jessa Hasselt": {
-    chirurgen: ["Dr. Wissels", "Dr. Achahbar", "Dr. Put", "Dr. Roosen", "Dr. Bamps", "Dr. Vanvolsem", "Dr. Plazier", "Dr. Meeus"]
+    chirurgen: ["Dr. Wissels", "Dr. Achahbar", "Dr. Put", "Dr. Roosen", "Dr. Bamps", "Dr. Vanvolsem", "Dr. Plazier", "Dr. Meeus", "andere"]
   },
   "St. Franciscus Heusden": {
     chirurgen: ["Dr. Vanvolsem", "Dr. Achahbar"]
