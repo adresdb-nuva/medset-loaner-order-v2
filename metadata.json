@@ -1,0 +1,5 @@
+{
+  "name": "MedSet Loaner Order",
+  "description": "Bestel medische sets (loaners) voor ingrepen op basis van regionale inventarislijsten.",
+  "requestFramePermissions": []
+}
