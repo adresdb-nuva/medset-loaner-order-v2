@@ -34,7 +34,8 @@ const ZIEKENHUIS_DATA: Record<string, { chirurgen: string[] }> = {
 const TARGET_EMAILS = [
   "belgiumorders@globusmedical.com",
   "spelckmans@globusmedical.com",
-  "jwalravens@globusmedical.com"
+  "jwalravens@globusmedical.com",
+  "dirk@i-conic.be"
 ];
 
 export default function App() {
